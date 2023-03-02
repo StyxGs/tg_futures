@@ -25,7 +25,7 @@ BotDB = BotDB()
 async def start_command(message: Message) -> None:
     """Ответ на команду start и добавление пользователя в базу данных, если его нет"""
     await message.answer(LEXICON_RU['/start'])
-    BotDB.check_user_in_db(message.from_user.id)
+    await BotDB.check_user_in_db(message.from_user.id)
 
 
 @router.message(Command(commands=['help']))
@@ -51,7 +51,8 @@ async def cancel_state(message: Message, state: FSMContext) -> None:
 @router.message(WriteFuture.transaction_data, F.content_type == ContentType.TEXT)
 async def write_future(message: Message, state: FSMContext) -> None:
     """Отправляет данные о последних 3-х сделок"""
-    await message.answer(text=string_available_transaction_data(message.text.upper()))
+    text = await string_available_transaction_data(message.text.upper())
+    await message.answer(text=text)
     await state.clear()
 
 
@@ -78,7 +79,8 @@ async def look_command(message: Message, state: FSMContext) -> None:
 @router.message(WriteFuture.klines_data, F.content_type == ContentType.TEXT)
 async def write_future(message: Message, state: FSMContext) -> None:
     """Отображает данные о свече и выводит из состояния"""
-    await message.answer(text=string_available_klines_data(message.text))
+    text = await string_available_klines_data(message.text)
+    await message.answer(text=text)
     await state.clear()
 
 
@@ -99,7 +101,8 @@ async def look_command(message: Message, state: FSMContext) -> None:
 @router.message(WriteFuture.statistics_24hr, F.content_type == ContentType.TEXT)
 async def write_future(message: Message, state: FSMContext) -> None:
     """Отображает данные за 24 часа и выводит из состояния"""
-    await message.answer(text=statistics_for_24hr(message.text))
+    text = await statistics_for_24hr(message.text)
+    await message.answer(text=text)
     await state.clear()
 
 
@@ -120,7 +123,8 @@ async def look_command(message: Message, state: FSMContext) -> None:
 @router.message(WriteFuture.best_price, F.content_type == ContentType.TEXT)
 async def write_future(message: Message, state: FSMContext) -> None:
     """Отправляет сообщение с лучшей ценой продажи/покупки"""
-    await message.answer(text=best_price(message.text))
+    text = await best_price(message.text)
+    await message.answer(text=text)
     await state.clear()
 
 
@@ -135,22 +139,24 @@ async def wrong_to_write_future(message: Message) -> None:
 async def add_to_my_list(message: Message, state: FSMContext) -> None:
     """Даёт возможность добавить фьючерс в список"""
     await state.set_state(WriteFuture.choice_future)
+    keyboard = await list_of_available_futures()
     await message.answer(text='Отправьте текстовое сообщение с названием фьючерса',
-                         reply_markup=list_of_available_futures().as_markup())
+                         reply_markup=keyboard.as_markup())
 
 
 @router.callback_query(Text(text='list_of_available_futures'))
 async def show_list_futures(callback: CallbackQuery) -> None:
     """Показывает список всех доступных фьючерсов"""
+    keyboard = await formation_of_futures_buttons()
     await callback.message.edit_text(text=LEXICON_RU['about_list_futures'],
-                                     reply_markup=formation_of_futures_buttons().as_markup(), cache_time=3600)
+                                     reply_markup=keyboard.as_markup(), cache_time=3600)
 
 
 @router.callback_query(lambda x: x.data[0] == '*')
 async def add_future_callback(callback: CallbackQuery, state: FSMContext) -> None:
     """Добавить в фьючерс в список отлеживаемых через кнопку"""
     future = callback.data.upper()
-    BotDB.add_future_in_list(callback.from_user.id, future[1:])
+    await BotDB.add_future_in_list(callback.from_user.id, future[1:])
     await callback.answer(text='Фьючерс добавлен в список')
     await state.clear()
 
@@ -159,8 +165,9 @@ async def add_future_callback(callback: CallbackQuery, state: FSMContext) -> Non
 async def add_future_message(message: Message, state: FSMContext) -> None:
     """Добавить в фьючерс в список отлеживаемых через сообщение"""
     future = message.text
-    if future in list_futures_for_button():
-        BotDB.add_future_in_list(message.from_user.id, future)
+    futures = await list_futures_for_button()
+    if future.upper() in futures:
+        await BotDB.add_future_in_list(message.from_user.id, future.upper())
         await message.answer(text='Фьючерс добавлен в список')
         await state.clear()
     else:
@@ -177,9 +184,10 @@ async def wrong_to_write_future(message: Message) -> None:
 @router.message(Command(commands=['tracked']))
 async def show_my_list_futures(message: Message) -> None:
     """Отправить список отслеживаемых фьючерсов из инлайн-кнопок"""
-    my_futures = BotDB.show_my_list_futures(message.from_user.id)
+    my_futures = await BotDB.show_my_list_futures(message.from_user.id)
+    keyboard = await create_tracked_list(my_futures)
     if my_futures:
-        await message.answer(text='Ваши фьючерсы:', reply_markup=create_tracked_list(my_futures).as_markup())
+        await message.answer(text='Ваши фьючерсы:', reply_markup=keyboard.as_markup())
     else:
         await message.answer(text='Вы не отслеживаете ни один фьючерс')
 
@@ -187,10 +195,11 @@ async def show_my_list_futures(message: Message) -> None:
 @router.message(Command(commands=['price_notification']))
 async def show_my_list_futures_for_notification(message: Message, state: FSMContext) -> None:
     """Состояния добавления оповещение по фьючерсу"""
-    my_futures = BotDB.show_my_list_futures(message.from_user.id)
+    my_futures = await BotDB.show_my_list_futures(message.from_user.id)
+    keyboard = await create_tracked_list(my_futures)
     if my_futures:
         await state.set_state(WriteFuture.notification)
-        await message.answer(text='Выберите фьючерс:', reply_markup=create_tracked_list(my_futures).as_markup())
+        await message.answer(text='Выберите фьючерс:', reply_markup=keyboard.as_markup())
     else:
         await message.answer(text='Вы не отслеживаете ни один фьючерс. Добавить? /add')
 
@@ -209,7 +218,6 @@ async def add_interval_notification(callback: CallbackQuery, state: FSMContext, 
     context_data = await state.get_data()
     time = int(callback.data)
     future = context_data.get('future')
-    await callback.message.edit_text(text='Интервал задан. Оповещение добавлено!')
     if future not in [ft.id for ft in apscheduler.get_jobs()]:
         apscheduler.add_job(send_notification_message, trigger='interval', minutes=time,
                             kwargs={'bot': bot, 'chat_id': callback.from_user.id, 'future': future}, id=future)
@@ -224,27 +232,30 @@ async def add_interval_notification(callback: CallbackQuery, state: FSMContext, 
 async def press_future_in_my_futures_list(callback: CallbackQuery) -> None:
     """Отправляет цену фьючерса на бирже в данный момент"""
     await callback.answer()
-    await callback.message.answer(text=f'{price_future(callback.data[0:-1])}')
+    text = await price_future(callback.data[0:-1])
+    await callback.message.answer(text=text)
 
 
 @router.callback_query(Text(text='del_futures'))
 async def show_for_deletion_future_in_my_list_futures(callback: CallbackQuery) -> None:
     """Отправляет список фьючерсов для удаления"""
-    my_futures = BotDB.show_my_list_futures(callback.from_user.id)
+    my_futures = await BotDB.show_my_list_futures(callback.from_user.id)
+    keyboard = await delete_future(my_futures)
     if my_futures:
         await callback.message.edit_text(text='Выберите фьючерс для удаления:',
-                                         reply_markup=delete_future(my_futures).as_markup())
+                                         reply_markup=keyboard.as_markup())
 
 
 @router.callback_query(lambda x: x.data[-3:] == 'del')
 async def cancel_deletion_future(callback: CallbackQuery, apscheduler: AsyncIOScheduler,) -> None:
     """Удаляет фьючерс из списка отслеживаемых"""
     future = callback.data[:-3]
-    BotDB.delete_future_in_my_list(callback.from_user.id, future)
-    my_futures = BotDB.show_my_list_futures(callback.from_user.id)
+    await BotDB.delete_future_in_my_list(callback.from_user.id, future)
+    my_futures = await BotDB.show_my_list_futures(callback.from_user.id)
+    keyboard = await delete_future(my_futures)
     if my_futures:
         await callback.message.edit_text(text='Выберите фьючерс для удаления:',
-                                         reply_markup=delete_future(my_futures).as_markup())
+                                         reply_markup=keyboard.as_markup())
         # Проверяет задано ли оповещение о выбранном фьючерсе, если да то удаляет и его
         if future in [ft.id for ft in apscheduler.get_jobs()]:
             apscheduler.remove_job(job_id=future)
@@ -255,5 +266,6 @@ async def cancel_deletion_future(callback: CallbackQuery, apscheduler: AsyncIOSc
 @router.callback_query(Text(text='cancel'))
 async def press_cancel(callback: CallbackQuery) -> None:
     """Отменяет редактирования списка"""
-    my_futures = BotDB.show_my_list_futures(callback.from_user.id)
-    await callback.message.edit_text(text='Ваши фьючерсы:', reply_markup=create_tracked_list(my_futures).as_markup())
+    my_futures = await BotDB.show_my_list_futures(callback.from_user.id)
+    keyboard = await create_tracked_list(my_futures)
+    await callback.message.edit_text(text='Ваши фьючерсы:', reply_markup=keyboard.as_markup())

@@ -1,72 +1,76 @@
 # Работа с базой данных
+import asyncpg
+from environs import Env
 
-from config.config import connecting_to_db
+ENV = Env()
+ENV.read_env()
 
 
 class BotDB:
     """Класс для работы с базой данных"""
 
-    def __init__(self):
+    async def connection(self):
         """Подключаемся к бд"""
-        self.conn = connecting_to_db()
-        self.cursor = self.conn.cursor()
+        return await asyncpg.create_pool(database=ENV('DB_NAME'), user=ENV('DB_USER'),
+                                         password=ENV('DB_PASSWORD'),
+                                         host=ENV('DB_HOST'), port=ENV('DB_PORT'))
 
-    def check_user_in_db(self, user_id: int) -> None:
+    async def check_user_in_db(self, user_id: int) -> None:
         """Проверяем есть ли пользователь в базе, если нет то добавляем"""
-        self.cursor.execute('SELECT tg_user_id FROM tg_bot_users WHERE tg_user_id = %s', (user_id,))
-        if self.cursor.fetchone() is None:
-            self.cursor.execute('INSERT INTO tg_bot_users (tg_user_id) VALUES (%s)', (user_id,))
-            self.conn.commit()
+        conn = await self.connection()
+        async with conn.acquire() as conn:
+            if await conn.fetchval('SELECT tg_user_id FROM tg_bot_users WHERE tg_user_id = $1', (user_id,)) is None:
+                await conn.execute('INSERT INTO tg_bot_users (tg_user_id) VALUES ($1)', (user_id,))
 
-    def check_future_in_db(self, future: str) -> int:
+    async def check_future_in_db(self, future: str, conn) -> int:
         """Проверяет есть ли такой фьючерс в бд, если нет добавляет его"""
-        id_future = self._give_future(future)
+        id_future = await self._give_future(future, conn)
         if id_future:
-            return id_future[0]
+            return id_future
         else:
-            self.cursor.execute('INSERT INTO futures (future) VALUES (%s)', (future,))
-            self.conn.commit()
-            return self._give_future(future)[0]
+            await conn.execute('INSERT INTO futures (future) VALUES ($1)', future)
+            return await self._give_future(future, conn)
 
-    def _give_future(self, future: str):
+    async def _give_future(self, future: str, conn):
         """Отдаёт id фьючерса"""
-        self.cursor.execute('SELECT * FROM futures WHERE future = (%s)', (future,))
-        return self.cursor.fetchone()
+        return await conn.fetchval('SELECT * FROM futures WHERE future = $1', future)
 
-    def _give_user_id(self, tg_user_id: int):
-        self.cursor.execute('SELECT * FROM tg_bot_users WHERE tg_user_id = (%s)', (tg_user_id,))
-        return self.cursor.fetchone()[0]
+    async def _give_user_id(self, tg_user_id: int, conn):
+        """Отдаёт id пользователя"""
+        return await conn.fetchval('SELECT * FROM tg_bot_users WHERE tg_user_id = $1', tg_user_id)
 
-    def add_future_in_list(self, tg_user_id: int, future: str) -> None:
+    async def add_future_in_list(self, tg_user_id: int, future: str) -> None:
         """Добавляет фьючерс в список отслеживаемых пользователем"""
-        id_user = self._give_user_id(tg_user_id)
-        id_future = self.check_future_in_db(future)
-        self.cursor.execute(
-            'SELECT users_id, futures_id FROM tg_bot_users_futures WHERE users_id = (%s) and futures_id = (%s)',
-            (id_user, id_future))
-        if not self.cursor.fetchone():
-            self.cursor.execute('INSERT INTO tg_bot_users_futures (users_id, futures_id) VALUES (%s, %s)',
-                                (id_user, id_future))
-            self.conn.commit()
+        conn = await self.connection()
+        async with conn.acquire() as conn:
+            id_user = await self._give_user_id(tg_user_id, conn)
+            id_future = await self.check_future_in_db(future, conn)
+            if not await conn.fetchrow(
+                    'SELECT users_id, futures_id FROM tg_bot_users_futures WHERE users_id = $1 and futures_id = $2',
+                    id_user, id_future):
+                await conn.execute('INSERT INTO tg_bot_users_futures (users_id, futures_id) VALUES ($1, $2)',
+                                   id_user, id_future)
 
-    def show_my_list_futures(self, tg_user_id: int) -> list | bool:
+    async def show_my_list_futures(self, tg_user_id: int) -> list | bool:
         """Отдаёт список фьючерсов отслеживаемых пользователем"""
-        user_id = self._give_user_id(tg_user_id)
-        self.cursor.execute('SELECT futures_id FROM tg_bot_users_futures WHERE users_id = %s', (user_id,))
-        futures = self.cursor.fetchall()
-        if futures:
-            futures_id = []
-            for f_id in futures:
-                futures_id.append(f_id[0])
-            self.cursor.execute('SELECT future FROM futures WHERE id IN %s', [tuple(futures_id)])
-            return self.cursor.fetchall()
-        else:
-            return False
+        conn = await self.connection()
+        async with conn.acquire() as conn:
+            user_id = await self._give_user_id(tg_user_id, conn)
+            futures = await conn.fetch('SELECT futures_id FROM tg_bot_users_futures WHERE users_id = $1', user_id)
+            if futures:
+                futures_id = []
+                for f_id in futures:
+                    futures_id.append(f_id['futures_id'])
+                fts = await conn.fetch('SELECT future FROM futures WHERE id = ANY($1) ', futures_id)
+                return [ft['future'] for ft in fts]
+            else:
+                return False
 
-    def delete_future_in_my_list(self, tg_user_id: int, future: str) -> None:
+    async def delete_future_in_my_list(self, tg_user_id: int, future: str) -> None:
         """Удаляет фьючерс из списка отслеживаемых"""
-        user_id = self._give_user_id(tg_user_id)
-        self.cursor.execute('DELETE FROM tg_bot_users_futures '
-                            'WHERE users_id = %s and futures_id in (SELECT id FROM futures WHERE future = %s)',
-                            (user_id, future))
-        self.conn.commit()
+        conn = await self.connection()
+        async with conn.acquire() as conn:
+            user_id = await self._give_user_id(tg_user_id, conn)
+            await conn.execute('DELETE FROM tg_bot_users_futures '
+                           'WHERE users_id = $1 and futures_id in (SELECT id FROM futures WHERE future = $2)',
+                           user_id, future)
