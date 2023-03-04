@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, ContentType, Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from database.db import BotDB
+from database import db
 from handlers.shedulers import send_notification_message
 from keyboards.keydoard import time_keyboards, time_list
 from keyboards.tracked_list import (create_tracked_list, delete_future,
@@ -18,7 +18,7 @@ from services.service import (best_price, list_futures_for_button,
 from services.statesform import WriteFuture
 
 router = Router()
-BotDB = BotDB()
+BotDB = db.BotDB()
 
 
 @router.message(CommandStart())
@@ -169,9 +169,9 @@ async def add_future_message(message: Message, state: FSMContext) -> None:
     if future.upper() in futures:
         await BotDB.add_future_in_list(message.from_user.id, future.upper())
         await message.answer(text='Фьючерс добавлен в список')
-        await state.clear()
     else:
         await message.answer(text='Возможно вы некорректно ввели название фьючерса попробуйте снова.')
+    await state.clear()
 
 
 @router.message(WriteFuture.choice_future)
@@ -185,8 +185,8 @@ async def wrong_to_write_future(message: Message) -> None:
 async def show_my_list_futures(message: Message) -> None:
     """Отправить список отслеживаемых фьючерсов из инлайн-кнопок"""
     my_futures = await BotDB.show_my_list_futures(message.from_user.id)
-    keyboard = await create_tracked_list(my_futures)
     if my_futures:
+        keyboard = await create_tracked_list(my_futures)
         await message.answer(text='Ваши фьючерсы:', reply_markup=keyboard.as_markup())
     else:
         await message.answer(text='Вы не отслеживаете ни один фьючерс')
@@ -196,8 +196,8 @@ async def show_my_list_futures(message: Message) -> None:
 async def show_my_list_futures_for_notification(message: Message, state: FSMContext) -> None:
     """Состояния добавления оповещение по фьючерсу"""
     my_futures = await BotDB.show_my_list_futures(message.from_user.id)
-    keyboard = await create_tracked_list(my_futures)
     if my_futures:
+        keyboard = await create_tracked_list(my_futures)
         await state.set_state(WriteFuture.notification)
         await message.answer(text='Выберите фьючерс:', reply_markup=keyboard.as_markup())
     else:
@@ -220,7 +220,7 @@ async def add_interval_notification(callback: CallbackQuery, state: FSMContext, 
     future = context_data.get('future')
     if future not in [ft.id for ft in apscheduler.get_jobs()]:
         apscheduler.add_job(send_notification_message, trigger='interval', minutes=time,
-                            kwargs={'bot': bot, 'chat_id': callback.from_user.id, 'future': future}, id=future)
+                            kwargs={'chat_id': callback.from_user.id, 'future': future}, id=future)
         await callback.message.edit_text(text='Интервал задан. Оповещение добавлено!')
     else:
         apscheduler.reschedule_job(job_id=future, trigger='interval', minutes=time)
@@ -240,20 +240,20 @@ async def press_future_in_my_futures_list(callback: CallbackQuery) -> None:
 async def show_for_deletion_future_in_my_list_futures(callback: CallbackQuery) -> None:
     """Отправляет список фьючерсов для удаления"""
     my_futures = await BotDB.show_my_list_futures(callback.from_user.id)
-    keyboard = await delete_future(my_futures)
     if my_futures:
+        keyboard = await delete_future(my_futures)
         await callback.message.edit_text(text='Выберите фьючерс для удаления:',
                                          reply_markup=keyboard.as_markup())
 
 
 @router.callback_query(lambda x: x.data[-3:] == 'del')
-async def cancel_deletion_future(callback: CallbackQuery, apscheduler: AsyncIOScheduler,) -> None:
+async def cancel_deletion_future(callback: CallbackQuery, apscheduler: AsyncIOScheduler, ) -> None:
     """Удаляет фьючерс из списка отслеживаемых"""
     future = callback.data[:-3]
     await BotDB.delete_future_in_my_list(callback.from_user.id, future)
     my_futures = await BotDB.show_my_list_futures(callback.from_user.id)
-    keyboard = await delete_future(my_futures)
     if my_futures:
+        keyboard = await delete_future(my_futures)
         await callback.message.edit_text(text='Выберите фьючерс для удаления:',
                                          reply_markup=keyboard.as_markup())
         # Проверяет задано ли оповещение о выбранном фьючерсе, если да то удаляет и его

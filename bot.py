@@ -1,11 +1,13 @@
 import asyncio
 import logging
+import aioredis
 
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler_di import ContextSchedulerDecorator
 
-from config.config import Config, load_config
+from config.config import Config, load_config, jobstores
 from handlers import other_handlers, user_handlers
 from keyboards.set_menu import set_menu
 from middlewares.apscheduler import ApschedulerMiddleware
@@ -29,15 +31,20 @@ async def main():
 
     # Загружаем конфигруцию бота
     config: Config = load_config()
+    # Инициализируем Redis
+    redis = await aioredis.from_url(url=f'redis://localhost:6379', db=0)
 
     # Инициализируем хранилище (создаем экземпляр класса MemoryStorage)
-    storage: MemoryStorage = MemoryStorage()
+    storage: RedisStorage = RedisStorage(redis)
 
     # Инициализируем бот и диспетчер
     bot: Bot = Bot(token=config.tgbot.token, parse_mode='HTML')
     dp: Dispatcher = Dispatcher(storage=storage)
 
-    apscheduler = AsyncIOScheduler(timezone='Europe/Moscow')
+    # Инициализируем apscheduler
+
+    apscheduler = ContextSchedulerDecorator(AsyncIOScheduler(timezone='Europe/Moscow', jobstores=jobstores))
+    apscheduler.ctx.add_instance(bot, declared_class=Bot)
     apscheduler.start()
 
     # Загружаем роутары
