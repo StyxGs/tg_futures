@@ -32,7 +32,7 @@ async def main():
     # Загружаем конфигруцию бота
     config: Config = load_config()
     # Инициализируем Redis
-    redis = await aioredis.from_url(url=f'redis://localhost:6379', db=0)
+    redis = await aioredis.from_url(url=f'redis://bot_redis:6379', db=0)
 
     # Инициализируем хранилище (создаем экземпляр класса MemoryStorage)
     storage: RedisStorage = RedisStorage(redis)
