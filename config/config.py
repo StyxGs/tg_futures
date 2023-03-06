@@ -25,7 +25,7 @@ def load_config(path: str | None = None) -> Config:
 jobstores: dict = {
         'default': RedisJobStore(jobs_key='dispatched_trips_jobs',
                                  run_times_key='dispatched_trips_running',
-                                 host='localhost',
+                                 host='bot_redis',
                                  db=0,
                                  port=6379)
     }
