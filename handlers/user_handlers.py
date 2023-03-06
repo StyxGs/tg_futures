@@ -220,7 +220,8 @@ async def add_interval_notification(callback: CallbackQuery, state: FSMContext, 
     future = context_data.get('future')
     if future not in [ft.id for ft in apscheduler.get_jobs()]:
         apscheduler.add_job(send_notification_message, trigger='interval', minutes=time,
-                            kwargs={'chat_id': callback.from_user.id, 'future': future}, id=future)
+                            kwargs={'chat_id': callback.from_user.id, 'future': future},
+                            id=f'{future}{callback.from_user.id}')
         await callback.message.edit_text(text='Интервал задан. Оповещение добавлено!')
     else:
         apscheduler.reschedule_job(job_id=future, trigger='interval', minutes=time)
@@ -257,8 +258,8 @@ async def cancel_deletion_future(callback: CallbackQuery, apscheduler: AsyncIOSc
         await callback.message.edit_text(text='Выберите фьючерс для удаления:',
                                          reply_markup=keyboard.as_markup())
         # Проверяет задано ли оповещение о выбранном фьючерсе, если да то удаляет и его
-        if future in [ft.id for ft in apscheduler.get_jobs()]:
-            apscheduler.remove_job(job_id=future)
+        if f'{future}{callback.from_user.id}' in [ft.id for ft in apscheduler.get_jobs()]:
+            apscheduler.remove_job(job_id=f'{future}{callback.from_user.id}')
     else:
         await callback.message.edit_text(text='Вы не отслеживаете ни один фьючерс')
 
